@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Informe Semana 9 - DIP y DI</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; color: #1a1a1a; line-height: 1.5; }
+  h1 { font-size: 24px; border-bottom: 3px solid #2c3e50; padding-bottom: 8px; }
+  h2 { font-size: 18px; color: #2c3e50; margin-top: 28px; border-left: 4px solid #3498db; padding-left: 10px; }
+  h3 { font-size: 15px; color: #34495e; }
+  code, pre { font-family: Consolas, 'Courier New', monospace; }
+  pre { background: #f4f6f8; border: 1px solid #d0d7de; border-radius: 4px; padding: 10px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
+  th, td { border: 1px solid #c0c8d0; padding: 6px 10px; text-align: left; }
+  th { background: #2c3e50; color: #fff; }
+  tr:nth-child(even) { background: #f4f6f8; }
+  .ok { color: #1a7f37; font-weight: bold; }
+  .box { background: #eef7ee; border: 1px solid #b6d7b6; border-radius: 4px; padding: 12px; }
+  .diagram { background: #f9fafb; border: 1px solid #d0d7de; border-radius: 4px; padding: 20px; text-align: center; font-size: 13px; }
+  .layer { display: inline-block; border: 2px solid #2c3e50; border-radius: 6px; padding: 10px 16px; margin: 6px; background: #fff; }
+  .arrow { font-size: 20px; color: #3498db; margin: 0 8px; }
+  .small { font-size: 12px; color: #666; }
+  ul { margin: 6px 0; }
+</style>
+</head>
+<body>
+
+<h1>Informe Laboratorio Semana 9 &mdash; De n-capas a DIP y DI</h1>
+<p><strong>Arquitectura de Sistemas I &mdash; 2026-2</strong></p>
+
+<table>
+  <tr><th>Estudiante</th><td>Juan Rojas (jdrojasp11)</td></tr>
+  <tr><th>Repositorio (fork)</th><td><a href="https://github.com/jdrojasp11/demo-cliente-servidor">https://github.com/jdrojasp11/demo-cliente-servidor</a></td></tr>
+  <tr><th>Rama principal</th><td><code>main</code> (versión n-capas Semana 8, sin modificar)</td></tr>
+  <tr><th>Rama de trabajo</th><td><code>refactor-dip-di</code> (DIP + DI + pruebas)</td></tr>
+  <tr><th>Repositorio de referencia</th><td><a href="https://github.com/ebuitrago/demo-cliente-servidor">ebuitrago/demo-cliente-servidor</a> (upstream, no modificado)</td></tr>
+  <tr><th>Fecha</th><td>2026-10-21</td></tr>
+</table>
+
+<h2>1. Objetivo</h2>
+<p>Refactorizar la versión en capas de la Semana 8 aplicando el <strong>Principio de Inversión de Dependencias (DIP)</strong> y la <strong>Inyección de Dependencias (DI)</strong>, de modo que la capa de aplicación deje de importar módulos concretos de persistencia. El criterio de éxito es poder ejecutar los casos de uso con repositorios simulados y conservar los endpoints existentes con PostgreSQL.</p>
+
+<h2>2. Preparación y rama</h2>
+<pre>git clone --branch main https://github.com/ebuitrago/demo-cliente-servidor.git demo-citas-semana9-local
+git switch -c refactor-dip-di
+npm ci
+New-Item -ItemType Directory -Force -Path "src/aplicacion/contratos", "test"</pre>
+<p>Estado de la rama antes de crear: <code>main</code>. Después: <code>refactor-dip-di</code>. <code>npm ci</code> instaló 85 paquetes sin modificar el bloqueo.</p>
+
+<h2>3. Protección de credenciales (.gitignore)</h2>
+<pre>node_modules/
+.env</pre>
+<table>
+  <tr><th>Comando</th><th>Resultado</th></tr>
+  <tr><td><code>git check-ignore -v --no-index .env</code></td><td><code>.gitignore:2:.env&nbsp;&nbsp;&nbsp;&nbsp;.env</code> <span class="ok">(regla activa)</span></td></tr>
+  <tr><td><code>git ls-files -- .env</code></td><td>(sin salida) <span class="ok">no está bajo seguimiento</span></td></tr>
+</table>
+
+<h2>4. Cambios aplicados (DIP + DI)</h2>
+<h3>4.1 Contrato estructural &mdash; <code>src/aplicacion/contratos/repositorios.js</code> (nuevo)</h3>
+<pre>function exigirMetodos(objeto, metodos, nombre) {
+  for (const metodo of metodos) {
+    if (typeof objeto?.[metodo] !== 'function') {
+      throw new TypeError(`${nombre} debe implementar ${metodo}()`);
+    }
+  }
+}
+function verificarRepositorios({ citaRepository, profesionalRepository }) {
+  exigirMetodos(citaRepository,
+    ['listarTodas', 'existeEnHorario', 'guardar'], 'citaRepository');
+  exigirMetodos(profesionalRepository, ['listarTodos'], 'profesionalRepository');
+}
+module.exports = { verificarRepositorios };</pre>
+
+<h3>4.2 Servicio de aplicación &mdash; <code>src/aplicacion/citaService.js</code></h3>
+<p>Se eliminaron los <code>require('../persistencia/...')</code>. El servicio ahora es una <strong>factoría</strong> que recibe los repositorios y un <strong>reloj inyectado</strong> para pruebas reproducibles.</p>
+<pre>const reglas = require('../dominio/reglasDeAgenda');
+const { verificarRepositorios } = require('./contratos/repositorios');
+
+function crearCitaService({ citaRepository, profesionalRepository,
+                            reloj = () => new Date() }) {
+  verificarRepositorios({ citaRepository, profesionalRepository });
+  return {
+    consultarCitas: () => citaRepository.listarTodas(),
+    consultarProfesionales: () => profesionalRepository.listarTodos(),
+    reservarCita: async (datos) => {
+      reglas.validarDatosCompletos(datos);
+      reglas.validarFechaFutura(datos.fecha_hora, reloj());
+      const ocupado = await citaRepository.existeEnHorario(
+        datos.profesional_id, datos.fecha_hora);
+      reglas.validarAgendaLibre(ocupado);
+      const id = await citaRepository.guardar(datos);
+      return { mensaje: 'Cita creada', id };
+    }
+  };
+}
+module.exports = { crearCitaService };</pre>
+
+<h3>4.3 Rutas Express &mdash; <code>src/presentacion/citasRoutes.js</code></h3>
+<p>La factoría recibe el servicio ya construido y conserva los cuatro endpoints.</p>
+<pre>function crearCitasRoutes({ citaService }) {
+  const router = express.Router();
+  const CODIGO_HTTP = { DATOS_FALTANTES: 400, FECHA_INVALIDA: 400,
+                        FECHA_PASADA: 400, AGENDA_OCUPADA: 409 };
+  router.get('/salud', ...);
+  router.get('/citas', ...);
+  router.get('/profesionales', ...);
+  router.post('/citas', ...);
+  return router;
+}
+module.exports = { crearCitasRoutes };</pre>
+
+<h3>4.4 Punto de composición &mdash; <code>server.js</code></h3>
+<p>Único lugar donde se importan implementaciones concretas y se inyectan.</p>
+<pre>const { crearCitaService } = require('./src/aplicacion/citaService');
+const citaRepository = require('./src/persistencia/citaRepository');
+const profesionalRepository = require('./src/persistencia/profesionalRepository');
+
+const citaService = crearCitaService({ citaRepository, profesionalRepository });
+app.use('/api', crearCitasRoutes({ citaService }));</pre>
+
+<h2>5. Diagrama de dependencias</h2>
+<div class="diagram">
+  <div class="layer"><strong>server.js</strong><br><span class="small">Punto de composición</span></div>
+  <br><span class="arrow">&#8595; inyecta</span><br>
+  <div class="layer"><strong>citaService.js</strong><br><span class="small">Aplicación</span></div>
+  <span class="arrow">&#8594;</span>
+  <div class="layer"><strong>repositorios.js</strong><br><span class="small">Contrato (DIP)</span></div>
+  <span class="arrow">&#8592;</span>
+  <div class="layer"><strong>citasRoutes.js</strong><br><span class="small">Presentación</span></div>
+  <br><span class="arrow">&#8595; implementan</span><br>
+  <div class="layer"><strong>citaRepository.js</strong></div>
+  <div class="layer"><strong>profesionalRepository.js</strong></div>
+  <br><span class="small">Aplicación ya NO depende de persistencia (inversión lograda)</span>
+</div>
+<p><strong>Antes (Semana 8):</strong> <code>citaService.js</code> &rarr; <code>require('../persistencia/...')</code>.<br>
+<strong>Después (Semana 9):</strong> <code>server.js</code> &rarr; repositorios &rarr; servicio &rarr; rutas; el servicio depende de abstracciones.</p>
+
+<h2>6. Comprobación de sintaxis y desacoplamiento</h2>
+<pre>node --check src/aplicacion/contratos/repositorios.js   # OK
+node --check src/aplicacion/citaService.js              # OK
+node --check src/presentacion/citasRoutes.js            # OK
+node --check server.js                                  # OK
+node -e "require('./src/presentacion/citasRoutes')..."  # function
+Get-ChildItem .\src\aplicacion -Filter *.js -Recurse |
+  Select-String -Pattern 'persistencia/'                 # sin resultados</pre>
+<p class="ok">La capa de aplicación no contiene ninguna importación hacia módulos concretos de persistencia.</p>
+
+<h2>7. Pruebas unitarias (sin Supabase, sin Internet)</h2>
+<pre>node --test test/citaService.test.js</pre>
+<div class="box">
+<pre>✔ reserva permitida
+✔ agenda ocupada no genera escritura
+✔ fecha pasada se rechaza sin consultar PostgreSQL
+✔ Rechaza repositorios que no cumplen el contrato
+ℹ tests 4
+ℹ pass 4
+ℹ fail 0</pre>
+</div>
+<p>Usan <code>node:test</code> y repositorios en memoria. No inician Express, no requieren <code>.env</code> y no escriben en PostgreSQL.</p>
+
+<h2>8. Pruebas HTTP locales</h2>
+<table>
+  <tr><th>Petición</th><th>Resultado</th><th>Observación</th></tr>
+  <tr><td><code>GET /api/salud</code></td><td class="ok">200</td><td><code>{"estado":"ok","servidor":"activo",...}</code></td></tr>
+  <tr><td><code>POST /api/citas</code> (fecha 2020)</td><td class="ok">400</td><td>FECHA_PASADA (validación de dominio, sin escritura)</td></tr>
+  <tr><td><code>GET /api/profesionales</code></td><td>500</td><td>sin <code>DATABASE_URL</code> (esperado en local)</td></tr>
+</table>
+<p>Las pruebas 201 y 409 requieren una base de datos propia de pruebas; no se ejecutaron contra la base de producción de Render, tal como exige la guía.</p>
+
+<h2>9. Publicación de la rama</h2>
+<pre>git add .gitignore server.js src test
+git diff --cached --name-only   # .env y node_modules NO incluidos
+git commit -m "Semana 9: aplicar DIP y DI y ejecutar pruebas"
+git push --force-with-lease origin refactor-dip-di</pre>
+<p>La rama se publicó únicamente en el fork del equipo (<code>jdrojasp11/demo-cliente-servidor</code>). No se hizo merge a <code>main</code>, no se creó pull request y no se desplegó en Render. El repositorio del docente (<code>upstream</code>) permanece intacto.</p>
+
+<h2>10. Conclusiones</h2>
+<ul>
+  <li>La capa de aplicación pasó de depender de módulos concretos a depender de un <strong>contrato</strong> (DIP).</li>
+  <li>Las dependencias se construyen e inyectan en <code>server.js</code>, el punto de composición (DI).</li>
+  <li>El reloj inyectado permite pruebas deterministas de la regla de fecha futura.</li>
+  <li>Las 4 pruebas unitarias se ejecutan sin base de datos ni red.</li>
+  <li>Los endpoints de la API se conservan sin cambios funcionales.</li>
+</ul>
+
+</body>
+</html>
