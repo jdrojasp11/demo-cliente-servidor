@@ -160,13 +160,19 @@ Get-ChildItem .\src\aplicacion -Filter *.js -Recurse |
 <p>Usan <code>node:test</code> y repositorios en memoria. No inician Express, no requieren <code>.env</code> y no escriben en PostgreSQL.</p>
 
 <h2>8. Pruebas HTTP locales</h2>
+<p>Para validar los casos 201 y 409 se levantó una instancia <strong>PostgreSQL 17.6 local</strong> (puerto 5433, SSL activo) con los binarios portables, se aplicó <code>db/setup.sql</code> y se apuntó <code>DATABASE_URL</code> a esa base propia de pruebas. No se usó la base de producción de Render.</p>
 <table>
   <tr><th>Petición</th><th>Resultado</th><th>Observación</th></tr>
   <tr><td><code>GET /api/salud</code></td><td class="ok">200</td><td><code>{"estado":"ok","servidor":"activo",...}</code></td></tr>
+  <tr><td><code>GET /api/profesionales</code></td><td class="ok">200</td><td>3 profesionales desde PostgreSQL</td></tr>
+  <tr><td><code>GET /api/citas</code></td><td class="ok">200</td><td>lista de citas</td></tr>
+  <tr><td><code>POST /api/citas</code> (futura)</td><td class="ok">201</td><td>Cita creada, devuelve <code>id</code></td></tr>
+  <tr><td><code>POST /api/citas</code> (repetida)</td><td class="ok">409</td><td>AGENDA_OCUPADA</td></tr>
   <tr><td><code>POST /api/citas</code> (fecha 2020)</td><td class="ok">400</td><td>FECHA_PASADA (validación de dominio, sin escritura)</td></tr>
-  <tr><td><code>GET /api/profesionales</code></td><td>500</td><td>sin <code>DATABASE_URL</code> (esperado en local)</td></tr>
 </table>
-<p>Las pruebas 201 y 409 requieren una base de datos propia de pruebas; no se ejecutaron contra la base de producción de Render, tal como exige la guía.</p>
+<pre>node test/api-smoke.js
+API comprobada: GET 200, POST 201, 409 y 400.</pre>
+<p class="ok">Las cuatro pruebas unitarias (4/4) y el smoke test HTTP completo (200/201/409/400) quedan aprobados.</p>
 
 <h2>9. Publicación de la rama</h2>
 <pre>git add .gitignore server.js src test
